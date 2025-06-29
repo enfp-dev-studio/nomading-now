@@ -1,126 +1,229 @@
 import { supabase } from './supabase';
-import { Tip, User, Comment } from '@/types';
+import { Tip, User, Comment, UserProfile } from '@/types';
 
 // Tips API
 export const tipsApi = {
   // Get all tips with user info and interaction status
   async getTips(userId?: string) {
-    let query = supabase
-      .from('tips')
-      .select(`
-        *,
-        user:users(*),
-        is_liked:tip_likes!left(user_id),
-        is_saved:tip_saves!left(user_id)
-      `)
-      .order('created_at', { ascending: false });
-
-    const { data, error } = await query;
+    console.log('🔍 [tipsApi.getTips] Starting database query...', { 
+      userId: userId || 'Not provided (non-logged user)',
+      hasUserId: !!userId 
+    });
     
-    if (error) throw error;
+    try {
+      // First, let's check if we can connect to the database at all
+      console.log('🔍 [tipsApi.getTips] Testing database connection...');
+      const { data: testData, error: testError } = await supabase
+        .from('tips')
+        .select('count')
+        .limit(1);
+      
+      if (testError) {
+        console.error('❌ [tipsApi.getTips] Database connection failed:', testError);
+        throw new Error(`Database connection failed: ${testError.message}`);
+      }
+      
+      console.log('✅ [tipsApi.getTips] Database connection successful');
 
-    // Transform the data to match our Tip interface
-    return data?.map(tip => ({
-      ...tip,
-      location: {
-        latitude: tip.latitude,
-        longitude: tip.longitude,
-        city: tip.city,
-        country: tip.country,
-        address: tip.address,
-      },
-      is_liked: userId ? tip.is_liked?.some((like: any) => like.user_id === userId) : false,
-      is_saved: userId ? tip.is_saved?.some((save: any) => save.user_id === userId) : false,
-    })) as Tip[];
+      // Now let's try to get the actual data
+      console.log('🔍 [tipsApi.getTips] Executing main query...');
+      
+      let query = supabase
+        .from('tips')
+        .select(`
+          *,
+          user:users(*),
+          is_liked:tip_likes!left(user_id),
+          is_saved:tip_saves!left(user_id)
+        `)
+        .order('created_at', { ascending: false });
+
+      const { data, error } = await query;
+      
+      if (error) {
+        console.error('❌ [tipsApi.getTips] Query error:', error);
+        throw new Error(`Query failed: ${error.message}`);
+      }
+
+      console.log('✅ [tipsApi.getTips] Raw database response:', data);
+      console.log(`📊 [tipsApi.getTips] Found ${data?.length || 0} tips in database`);
+
+      if (!data || data.length === 0) {
+        console.log('⚠️ [tipsApi.getTips] No tips found in database');
+        return [];
+      }
+
+      // Transform the data to match our Tip interface
+      const transformedTips = data.map((tip, index) => {
+        console.log(`🔄 [tipsApi.getTips] Transforming tip ${index + 1}:`, {
+          id: tip.id,
+          content: tip.content?.slice(0, 50) + '...',
+          user: tip.user?.nickname,
+          location: `${tip.city}, ${tip.country}`,
+          hasUser: !!tip.user,
+          userId: tip.user_id
+        });
+        
+        const transformedTip = {
+          ...tip,
+          location: {
+            latitude: Number(tip.latitude),
+            longitude: Number(tip.longitude),
+            city: tip.city,
+            country: tip.country,
+            address: tip.address,
+          },
+          // Only check likes/saves if user is logged in
+          is_liked: userId ? tip.is_liked?.some((like: any) => like.user_id === userId) : false,
+          is_saved: userId ? tip.is_saved?.some((save: any) => save.user_id === userId) : false,
+        };
+        
+        return transformedTip;
+      }) as Tip[];
+
+      console.log('🎉 [tipsApi.getTips] Successfully transformed tips');
+      console.log(`📈 [tipsApi.getTips] Returning ${transformedTips.length} tips`);
+      
+      return transformedTips;
+    } catch (error) {
+      console.error('💥 [tipsApi.getTips] Error in getTips:', error);
+      throw error;
+    }
   },
 
   // Get tips by category
   async getTipsByCategory(category: string, userId?: string) {
-    const { data, error } = await supabase
-      .from('tips')
-      .select(`
-        *,
-        user:users(*),
-        is_liked:tip_likes!left(user_id),
-        is_saved:tip_saves!left(user_id)
-      `)
-      .eq('category', category)
-      .order('created_at', { ascending: false });
+    console.log('🔍 [tipsApi.getTipsByCategory] Fetching tips by category:', { 
+      category, 
+      userId: userId || 'Not provided (non-logged user)',
+      hasUserId: !!userId 
+    });
+    
+    try {
+      const { data, error } = await supabase
+        .from('tips')
+        .select(`
+          *,
+          user:users(*),
+          is_liked:tip_likes!left(user_id),
+          is_saved:tip_saves!left(user_id)
+        `)
+        .eq('category', category)
+        .order('created_at', { ascending: false });
 
-    if (error) throw error;
+      if (error) {
+        console.error('❌ [tipsApi.getTipsByCategory] Database error:', error);
+        throw error;
+      }
 
-    return data?.map(tip => ({
-      ...tip,
-      location: {
-        latitude: tip.latitude,
-        longitude: tip.longitude,
-        city: tip.city,
-        country: tip.country,
-        address: tip.address,
-      },
-      is_liked: userId ? tip.is_liked?.some((like: any) => like.user_id === userId) : false,
-      is_saved: userId ? tip.is_saved?.some((save: any) => save.user_id === userId) : false,
-    })) as Tip[];
+      console.log(`✅ [tipsApi.getTipsByCategory] Found ${data?.length || 0} tips for category: ${category}`);
+
+      return data?.map(tip => ({
+        ...tip,
+        location: {
+          latitude: Number(tip.latitude),
+          longitude: Number(tip.longitude),
+          city: tip.city,
+          country: tip.country,
+          address: tip.address,
+        },
+        // Only check likes/saves if user is logged in
+        is_liked: userId ? tip.is_liked?.some((like: any) => like.user_id === userId) : false,
+        is_saved: userId ? tip.is_saved?.some((save: any) => save.user_id === userId) : false,
+      })) as Tip[] || [];
+    } catch (error) {
+      console.error('💥 [tipsApi.getTipsByCategory] Error in getTipsByCategory:', error);
+      throw error;
+    }
   },
 
   // Get tips by user
   async getUserTips(userId: string) {
-    const { data, error } = await supabase
-      .from('tips')
-      .select(`
-        *,
-        user:users(*)
-      `)
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
+    console.log('🔍 [tipsApi.getUserTips] Fetching user tips:', { userId });
+    
+    try {
+      const { data, error } = await supabase
+        .from('tips')
+        .select(`
+          *,
+          user:users(*)
+        `)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
 
-    if (error) throw error;
+      if (error) {
+        console.error('❌ [tipsApi.getUserTips] Database error:', error);
+        throw error;
+      }
 
-    return data?.map(tip => ({
-      ...tip,
-      location: {
-        latitude: tip.latitude,
-        longitude: tip.longitude,
-        city: tip.city,
-        country: tip.country,
-        address: tip.address,
-      },
-    })) as Tip[];
+      console.log(`✅ [tipsApi.getUserTips] Found ${data?.length || 0} tips for user: ${userId}`);
+
+      return data?.map(tip => ({
+        ...tip,
+        location: {
+          latitude: Number(tip.latitude),
+          longitude: Number(tip.longitude),
+          city: tip.city,
+          country: tip.country,
+          address: tip.address,
+        },
+      })) as Tip[] || [];
+    } catch (error) {
+      console.error('💥 [tipsApi.getUserTips] Error in getUserTips:', error);
+      throw error;
+    }
   },
 
   // Create a new tip
   async createTip(tip: Omit<Tip, 'id' | 'created_at' | 'updated_at' | 'user' | 'likes_count' | 'comments_count' | 'saves_count'>) {
-    const { data, error } = await supabase
-      .from('tips')
-      .insert({
-        user_id: tip.user_id,
-        content: tip.content,
-        category: tip.category,
-        images: tip.images || [],
-        latitude: tip.location.latitude,
-        longitude: tip.location.longitude,
-        city: tip.location.city,
-        country: tip.location.country,
-        address: tip.location.address,
-      })
-      .select(`
-        *,
-        user:users(*)
-      `)
-      .single();
+    console.log('🔍 [tipsApi.createTip] Creating new tip:', {
+      user_id: tip.user_id,
+      category: tip.category,
+      city: tip.location.city,
+      content: tip.content.slice(0, 50) + '...'
+    });
+    
+    try {
+      const { data, error } = await supabase
+        .from('tips')
+        .insert({
+          user_id: tip.user_id,
+          content: tip.content,
+          category: tip.category,
+          images: tip.images || [],
+          latitude: tip.location.latitude,
+          longitude: tip.location.longitude,
+          city: tip.location.city,
+          country: tip.location.country,
+          address: tip.location.address,
+        })
+        .select(`
+          *,
+          user:users(*)
+        `)
+        .single();
 
-    if (error) throw error;
+      if (error) {
+        console.error('❌ [tipsApi.createTip] Error creating tip:', error);
+        throw error;
+      }
 
-    return {
-      ...data,
-      location: {
-        latitude: data.latitude,
-        longitude: data.longitude,
-        city: data.city,
-        country: data.country,
-        address: data.address,
-      },
-    } as Tip;
+      console.log('✅ [tipsApi.createTip] Created tip:', data.id);
+
+      return {
+        ...data,
+        location: {
+          latitude: Number(data.latitude),
+          longitude: Number(data.longitude),
+          city: data.city,
+          country: data.country,
+          address: data.address,
+        },
+      } as Tip;
+    } catch (error) {
+      console.error('💥 [tipsApi.createTip] Error in createTip:', error);
+      throw error;
+    }
   },
 
   // Update a tip
@@ -153,8 +256,8 @@ export const tipsApi = {
     return {
       ...data,
       location: {
-        latitude: data.latitude,
-        longitude: data.longitude,
+        latitude: Number(data.latitude),
+        longitude: Number(data.longitude),
         city: data.city,
         country: data.country,
         address: data.address,
@@ -255,14 +358,14 @@ export const interactionsApi = {
     return data?.map(item => ({
       ...item.tip,
       location: {
-        latitude: item.tip.latitude,
-        longitude: item.tip.longitude,
+        latitude: Number(item.tip.latitude),
+        longitude: Number(item.tip.longitude),
         city: item.tip.city,
         country: item.tip.country,
         address: item.tip.address,
       },
       is_liked: true,
-    })) as Tip[];
+    })) as Tip[] || [];
   },
 
   // Get user's saved tips
@@ -283,14 +386,14 @@ export const interactionsApi = {
     return data?.map(item => ({
       ...item.tip,
       location: {
-        latitude: item.tip.latitude,
-        longitude: item.tip.longitude,
+        latitude: Number(item.tip.latitude),
+        longitude: Number(item.tip.longitude),
         city: item.tip.city,
         country: item.tip.country,
         address: item.tip.address,
       },
       is_saved: true,
-    })) as Tip[];
+    })) as Tip[] || [];
   },
 };
 
@@ -375,8 +478,23 @@ export const profilesApi = {
     return data;
   },
 
+  // Get user profile with marketing info (for public viewing)
+  async getUserProfileWithMarketing(userId: string) {
+    const { data, error } = await supabase
+      .from('users')
+      .select(`
+        *,
+        profile:user_profiles(*)
+      `)
+      .eq('id', userId)
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
   // Update user profile
-  async updateUserProfile(userId: string, updates: any) {
+  async updateUserProfile(userId: string, updates: Partial<UserProfile>) {
     const { data, error } = await supabase
       .from('user_profiles')
       .upsert({

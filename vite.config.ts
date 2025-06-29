@@ -10,9 +10,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png'],
       manifest: {
-        name: 'Nomad Tips',
-        short_name: 'NomadTips',
-        description: 'Real tip sharing platform for digital nomads',
+        name: 'Nomading Now',
+        short_name: 'NomadingNow',
+        description: 'Real-time nomad community platform',
         theme_color: '#ffc0cb',
         background_color: '#f7f9fa',
         display: 'standalone',

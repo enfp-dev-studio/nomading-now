@@ -22,9 +22,10 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TipCard } from '@/components/tips/TipCard';
 import { AuthModal } from '@/components/auth/AuthModal';
+import { MarketingSection } from '@/components/profile/MarketingSection';
 import { useAuthStore } from '@/store/useAuthStore';
 import { profilesApi, tipsApi, interactionsApi } from '@/lib/database';
-import { Tip } from '@/types';
+import { Tip, UserProfile } from '@/types';
 import { toast } from 'sonner';
 
 interface UserStats {
@@ -34,19 +35,6 @@ interface UserStats {
   saves_received: number;
   cities_visited: number;
   countries_visited: number;
-}
-
-interface UserProfile {
-  full_name?: string;
-  location?: string;
-  website?: string;
-  instagram?: string;
-  twitter?: string;
-  linkedin?: string;
-  languages?: string[];
-  interests?: string[];
-  travel_style?: string;
-  work_type?: string;
 }
 
 export function ProfilePage() {
@@ -131,6 +119,10 @@ export function ProfilePage() {
       console.error(`Error ${action}ing tip:`, error);
       toast.error(`Failed to ${action} tip`);
     }
+  };
+
+  const handleProfileUpdate = (updatedProfile: UserProfile) => {
+    setUserProfile(updatedProfile);
   };
 
   const getTrustBadge = (level: number) => {
@@ -339,13 +331,20 @@ export function ProfilePage() {
           </Card>
         </div>
 
+        {/* Marketing Section */}
+        <MarketingSection 
+          userProfile={userProfile}
+          isOwner={true}
+          onProfileUpdate={handleProfileUpdate}
+        />
+
         {/* Getting Started Card for new users */}
         {stats.tips_count === 0 && (
           <Card className="border-primary/20 bg-primary/5">
             <CardContent className="p-4 sm:p-6">
               <div className="text-center">
                 <h3 className="text-lg font-semibold text-foreground mb-2">
-                  Welcome to Nomad Tips! 🎉
+                  Welcome to Nomading Now! 🎉
                 </h3>
                 <p className="text-muted-foreground mb-4">
                   Start sharing your travel experiences and discover amazing tips from fellow nomads.
@@ -434,7 +433,7 @@ export function ProfilePage() {
                 ) : savedTips.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
                     <Bookmark className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p className="text-lg font-medium mb-2">No saved tips yet</p>
+                    <p className="text-sm text-muted-foreground">No saved tips yet</p>
                     <p className="text-sm">Save tips you want to reference later.</p>
                   </div>
                 ) : (

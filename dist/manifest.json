@@ -1,7 +1,7 @@
 {
-  "name": "Nomad Tips",
-  "short_name": "NomadTips",
-  "description": "Real tip sharing platform for digital nomads",
+  "name": "Nomading Now",
+  "short_name": "NomadingNow",
+  "description": "Real-time nomad community platform",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f7f9fa",

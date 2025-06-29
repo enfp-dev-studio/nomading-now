@@ -21,8 +21,19 @@ export interface UserProfile {
   interests?: string[];
   travel_style?: string;
   work_type?: string;
+  marketing_bio?: string;
+  marketing_links?: MarketingLink[];
+  show_marketing?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface MarketingLink {
+  id: string;
+  title: string;
+  url: string;
+  type: 'website' | 'portfolio' | 'social' | 'shop' | 'donation' | 'other';
+  icon?: string;
 }
 
 export interface UserStats {

@@ -24,7 +24,7 @@ export function DesktopSidebar() {
       <div className="hidden lg:flex lg:w-64 lg:flex-col lg:fixed lg:inset-y-0">
         <div className="flex flex-col flex-grow bg-card border-r border-border pt-5 pb-4 overflow-y-auto">
           <div className="flex items-center flex-shrink-0 px-4">
-            <h1 className="text-xl font-bold text-foreground">Nomad Tips</h1>
+            <h1 className="text-xl font-bold text-foreground">Nomading Now</h1>
           </div>
           
           <div className="mt-5 flex-grow flex flex-col">

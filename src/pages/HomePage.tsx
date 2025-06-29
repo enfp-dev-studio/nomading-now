@@ -18,7 +18,7 @@ export function HomePage() {
           <div className="px-4 py-4 sm:px-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex-1">
-                <h1 className="text-xl sm:text-2xl font-bold text-foreground">Nomad Tips</h1>
+                <h1 className="text-xl sm:text-2xl font-bold text-foreground">Nomading Now</h1>
                 <p className="text-sm text-muted-foreground mt-1">Discover real-time nomad tips</p>
               </div>
               

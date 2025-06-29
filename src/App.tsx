@@ -23,7 +23,6 @@ function App() {
                   <Route path="map" element={<MapPage />} />
                   <Route path="profile" element={<ProfilePage />} />
                 </Route>
-                <Route path="/dev" element={<DevPage />} />
               </Routes>
             </div>
             <Toaster />
