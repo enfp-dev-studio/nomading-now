@@ -4,9 +4,10 @@
   "description": "Real-time nomad community platform",
   "start_url": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
   "background_color": "#f7f9fa",
   "theme_color": "#ffc0cb",
-  "orientation": "portrait",
+  "orientation": "portrait-primary",
   "scope": "/",
   "icons": [
     {
@@ -37,7 +38,6 @@
   "categories": ["travel", "lifestyle", "social"],
   "lang": "en",
   "dir": "ltr",
-  "display_override": ["window-controls-overlay"],
   "edge_side_panel": {
     "preferred_width": 400
   }
