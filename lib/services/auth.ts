@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { db } from '@/lib/db';
+import { db } from '@/lib/db/connection';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 
@@ -50,22 +50,32 @@ export class AuthService {
   }
 
   static async getUserProfile(userId: string) {
-    const userProfile = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
+    try {
+      const userProfile = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
 
-    return userProfile[0] || null;
+      return userProfile[0] || null;
+    } catch (error) {
+      console.error('Error fetching user profile:', error);
+      return null;
+    }
   }
 
   static async updateUserProfile(userId: string, updates: Partial<typeof users.$inferInsert>) {
-    const updatedUser = await db
-      .update(users)
-      .set({ ...updates, updatedAt: new Date() })
-      .where(eq(users.id, userId))
-      .returning();
+    try {
+      const updatedUser = await db
+        .update(users)
+        .set({ ...updates, updatedAt: new Date() })
+        .where(eq(users.id, userId))
+        .returning();
 
-    return updatedUser[0];
+      return updatedUser[0];
+    } catch (error) {
+      console.error('Error updating user profile:', error);
+      throw new Error('Failed to update user profile');
+    }
   }
 }

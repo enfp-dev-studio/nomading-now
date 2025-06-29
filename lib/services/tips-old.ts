@@ -1,21 +1,23 @@
-import { db } from '@/lib/db/connection';
+import { withDatabase } from '@/lib/db/connection';
 import { tips, users, tipLikes, tipSaves, comments } from '@/lib/db/schema';
 import { eq, desc, and, sql, count, or, ilike } from 'drizzle-orm';
 import type { NewTip } from '@/lib/db/schema';
 
 export class TipsService {
   static async createTip(tipData: NewTip) {
-    try {
-      const newTip = await db
-        .insert(tips)
-        .values(tipData)
-        .returning();
+    return withDatabase(async (db) => {
+      try {
+        const newTip = await db
+          .insert(tips)
+          .values(tipData)
+          .returning();
 
-      return newTip[0];
-    } catch (error) {
-      console.error('Error creating tip:', error);
-      throw new Error('Failed to create tip');
-    }
+        return newTip[0];
+      } catch (error) {
+        console.error('Error creating tip:', error);
+        throw new Error('Failed to create tip');
+      }
+    });
   }
 
   static async getTips(options: {
@@ -26,8 +28,9 @@ export class TipsService {
     userId?: string;
     search?: string;
   } = {}) {
-    try {
-      const { limit = 20, offset = 0, city, category, userId, search } = options;
+    return withDatabase(async (db) => {
+      try {
+        const { limit = 20, offset = 0, city, category, userId, search } = options;
 
       let query = db
         .select({
@@ -39,28 +42,38 @@ export class TipsService {
             avatarUrl: users.avatarUrl,
             trustLevel: users.trustLevel,
           },
-          likesCount: tips.likesCount,
-          savesCount: tips.savesCount,
-          commentsCount: tips.commentsCount,
+          isLiked: sql<boolean>`CASE WHEN ${tipLikes.id} IS NOT NULL THEN true ELSE false END`,
+          isSaved: sql<boolean>`CASE WHEN ${tipSaves.id} IS NOT NULL THEN true ELSE false END`,
         })
         .from(tips)
         .leftJoin(users, eq(tips.userId, users.id))
+        .leftJoin(
+          tipLikes,
+          and(
+            eq(tipLikes.tipId, tips.id),
+            userId ? eq(tipLikes.userId, userId) : sql`false`
+          )
+        )
+        .leftJoin(
+          tipSaves,
+          and(
+            eq(tipSaves.tipId, tips.id),
+            userId ? eq(tipSaves.userId, userId) : sql`false`
+          )
+        )
         .orderBy(desc(tips.createdAt))
         .limit(limit)
         .offset(offset);
 
+      // Build where conditions
       const whereConditions = [];
-
+      
       if (city) {
-        whereConditions.push(ilike(tips.city, `%${city}%`));
+        whereConditions.push(eq(tips.city, city));
       }
 
       if (category) {
         whereConditions.push(eq(tips.category, category));
-      }
-
-      if (userId) {
-        whereConditions.push(eq(tips.userId, userId));
       }
 
       if (search) {
@@ -69,10 +82,11 @@ export class TipsService {
             ilike(tips.content, `%${search}%`),
             ilike(tips.locationName, `%${search}%`),
             ilike(tips.city, `%${search}%`)
-          )!
+          )
         );
       }
 
+      // Apply where conditions if any
       if (whereConditions.length > 0) {
         query = query.where(
           whereConditions.length === 1 
@@ -100,23 +114,25 @@ export class TipsService {
             avatarUrl: users.avatarUrl,
             trustLevel: users.trustLevel,
           },
-          isLiked: userId 
-            ? sql<boolean>`EXISTS(
-                SELECT 1 FROM ${tipLikes} 
-                WHERE ${tipLikes.tipId} = ${tips.id} 
-                AND ${tipLikes.userId} = ${userId}
-              )`
-            : sql<boolean>`false`,
-          isSaved: userId
-            ? sql<boolean>`EXISTS(
-                SELECT 1 FROM ${tipSaves} 
-                WHERE ${tipSaves.tipId} = ${tips.id} 
-                AND ${tipSaves.userId} = ${userId}
-              )`
-            : sql<boolean>`false`,
+          isLiked: sql<boolean>`CASE WHEN ${tipLikes.id} IS NOT NULL THEN true ELSE false END`,
+          isSaved: sql<boolean>`CASE WHEN ${tipSaves.id} IS NOT NULL THEN true ELSE false END`,
         })
         .from(tips)
         .leftJoin(users, eq(tips.userId, users.id))
+        .leftJoin(
+          tipLikes,
+          and(
+            eq(tipLikes.tipId, tips.id),
+            userId ? eq(tipLikes.userId, userId) : sql`false`
+          )
+        )
+        .leftJoin(
+          tipSaves,
+          and(
+            eq(tipSaves.tipId, tips.id),
+            userId ? eq(tipSaves.userId, userId) : sql`false`
+          )
+        )
         .where(eq(tips.id, tipId))
         .limit(1);
 
@@ -142,11 +158,12 @@ export class TipsService {
           .delete(tipLikes)
           .where(and(eq(tipLikes.tipId, tipId), eq(tipLikes.userId, userId)));
 
-        // Decrement likes count
+        // Decrease likes count
         await db
           .update(tips)
           .set({ 
-            likesCount: sql`${tips.likesCount} - 1`
+            likesCount: sql`${tips.likesCount} - 1`,
+            updatedAt: new Date()
           })
           .where(eq(tips.id, tipId));
 
@@ -157,19 +174,20 @@ export class TipsService {
           .insert(tipLikes)
           .values({ tipId, userId });
 
-        // Increment likes count
+        // Increase likes count
         await db
           .update(tips)
           .set({ 
-            likesCount: sql`${tips.likesCount} + 1`
+            likesCount: sql`${tips.likesCount} + 1`,
+            updatedAt: new Date()
           })
           .where(eq(tips.id, tipId));
 
         return { liked: true };
       }
     } catch (error) {
-      console.error('Error toggling like:', error);
-      throw new Error('Failed to toggle like');
+      console.error('Error liking tip:', error);
+      throw new Error('Failed to like tip');
     }
   }
 
@@ -188,11 +206,12 @@ export class TipsService {
           .delete(tipSaves)
           .where(and(eq(tipSaves.tipId, tipId), eq(tipSaves.userId, userId)));
 
-        // Decrement saves count
+        // Decrease saves count
         await db
           .update(tips)
           .set({ 
-            savesCount: sql`${tips.savesCount} - 1`
+            savesCount: sql`${tips.savesCount} - 1`,
+            updatedAt: new Date()
           })
           .where(eq(tips.id, tipId));
 
@@ -203,19 +222,20 @@ export class TipsService {
           .insert(tipSaves)
           .values({ tipId, userId });
 
-        // Increment saves count
+        // Increase saves count
         await db
           .update(tips)
           .set({ 
-            savesCount: sql`${tips.savesCount} + 1`
+            savesCount: sql`${tips.savesCount} + 1`,
+            updatedAt: new Date()
           })
           .where(eq(tips.id, tipId));
 
         return { saved: true };
       }
     } catch (error) {
-      console.error('Error toggling save:', error);
-      throw new Error('Failed to toggle save');
+      console.error('Error saving tip:', error);
+      throw new Error('Failed to save tip');
     }
   }
 
@@ -246,19 +266,25 @@ export class TipsService {
 
   static async getTipStats(userId: string) {
     try {
-      const result = await db
+      const stats = await db
         .select({
           totalTips: count(tips.id),
           totalLikes: sql<number>`COALESCE(SUM(${tips.likesCount}), 0)`,
           totalSaves: sql<number>`COALESCE(SUM(${tips.savesCount}), 0)`,
+          totalComments: sql<number>`COALESCE(SUM(${tips.commentsCount}), 0)`,
         })
         .from(tips)
         .where(eq(tips.userId, userId));
 
-      return result[0] || { totalTips: 0, totalLikes: 0, totalSaves: 0 };
+      return stats[0];
     } catch (error) {
       console.error('Error fetching tip stats:', error);
-      return { totalTips: 0, totalLikes: 0, totalSaves: 0 };
+      return {
+        totalTips: 0,
+        totalLikes: 0,
+        totalSaves: 0,
+        totalComments: 0,
+      };
     }
   }
 
@@ -269,7 +295,7 @@ export class TipsService {
         .where(and(eq(tips.id, tipId), eq(tips.userId, userId)))
         .returning();
 
-      return result.length > 0;
+      return result[0] || null;
     } catch (error) {
       console.error('Error deleting tip:', error);
       throw new Error('Failed to delete tip');
@@ -280,10 +306,7 @@ export class TipsService {
     try {
       const result = await db
         .update(tips)
-        .set({
-          ...updates,
-          updatedAt: new Date(),
-        })
+        .set({ ...updates, updatedAt: new Date() })
         .where(and(eq(tips.id, tipId), eq(tips.userId, userId)))
         .returning();
 
