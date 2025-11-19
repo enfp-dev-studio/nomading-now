@@ -7,7 +7,6 @@ import { DesktopSidebar } from '@/components/layout/DesktopSidebar';
 import { HomePage } from '@/pages/HomePage';
 import { MapPage } from '@/pages/MapPage';
 import { ProfilePage } from '@/pages/ProfilePage';
-import { DevPage } from '@/pages/DevPage';
 
 function App() {
   return (

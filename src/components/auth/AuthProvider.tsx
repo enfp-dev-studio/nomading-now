@@ -1,17 +1,10 @@
 import { useEffect } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { auth, supabase } from '@/lib/supabase';
-import { toast } from 'sonner';
 
 interface AuthProviderProps {
   children: React.ReactNode;
 }
-
-// 기본 로그인 계정 정보
-const DEFAULT_LOGIN = {
-  email: 'enfpdevtest@gmail.com',
-  password: 'test123456'
-};
 
 export function AuthProvider({ children }: AuthProviderProps) {
   const { setUser, setLoading } = useAuthStore();
@@ -22,55 +15,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setLoading(true);
       try {
         const { data: { user }, error } = await auth.getCurrentUser();
-        
+
         if (error) {
           console.error('Error getting current user:', error);
-          // 세션 에러가 있으면 기본 계정으로 자동 로그인 시도
-          await attemptDefaultLogin();
-          return;
-        }
-        
-        if (user) {
-          await loadUserProfile(user);
-        } else {
-          // 사용자가 없으면 기본 계정으로 자동 로그인
-          await attemptDefaultLogin();
-        }
-      } catch (error) {
-        console.error('Error getting initial session:', error);
-        // 에러 발생시 기본 계정으로 로그인 시도
-        await attemptDefaultLogin();
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    // 기본 계정으로 자동 로그인 시도
-    const attemptDefaultLogin = async () => {
-      try {
-        console.log('🔄 기본 계정으로 자동 로그인 시도 중...');
-        
-        // 기존 세션 정리
-        await auth.signOut();
-        
-        // 기본 계정으로 로그인
-        const { data, error } = await auth.signIn(DEFAULT_LOGIN.email, DEFAULT_LOGIN.password);
-        
-        if (error) {
-          console.error('기본 계정 로그인 실패:', error);
-          toast.error('자동 로그인에 실패했습니다. 수동으로 로그인해주세요.');
           setUser(null);
           return;
         }
 
-        if (data.user) {
-          console.log('✅ 기본 계정으로 자동 로그인 성공');
-          await loadUserProfile(data.user);
-          toast.success(`${DEFAULT_LOGIN.email}로 자동 로그인되었습니다`);
+        if (user) {
+          await loadUserProfile(user);
+        } else {
+          setUser(null);
         }
       } catch (error) {
-        console.error('자동 로그인 중 오류:', error);
+        console.error('Error getting initial session:', error);
         setUser(null);
+      } finally {
+        setLoading(false);
       }
     };
 
