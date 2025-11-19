@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { MapPin, Camera, X, Loader2, Plus, Navigation } from 'lucide-react';
+import { MapPin, Camera, X, Loader2, Plus, Navigation, AlertCircle } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -16,15 +16,25 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { TIP_CATEGORIES, TipCategory } from '@/types';
 import { useAuthStore } from '@/store/useAuthStore';
 import { tipsApi } from '@/lib/database';
 import { toast } from 'sonner';
+import {
+  getCurrentLocation,
+  calculateDistance,
+  formatDistance,
+  validateLocationProximity,
+  type Location
+} from '@/lib/location-utils';
 
 const createTipSchema = z.object({
-  content: z.string().min(10, 'Tip content must be at least 10 characters'),
+  content: z.string()
+    .min(10, 'Tip content must be at least 10 characters')
+    .max(280, 'Tip content must not exceed 280 characters'),
   category: z.string().min(1, 'Please select a category'),
-  images: z.array(z.string()).optional(),
+  images: z.array(z.string()).max(3, 'Maximum 3 images allowed').optional(),
 });
 
 type CreateTipForm = z.infer<typeof createTipSchema>;
@@ -53,6 +63,9 @@ export function CreateTipModal({ open, onOpenChange, location, onTipCreated }: C
     shortAddress?: string;
   } | null>(null);
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
+  const [currentLocation, setCurrentLocation] = useState<Location | null>(null);
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   const form = useForm<CreateTipForm>({
     resolver: zodResolver(createTipSchema),
@@ -63,12 +76,36 @@ export function CreateTipModal({ open, onOpenChange, location, onTipCreated }: C
     },
   });
 
+  // Get current user location when modal opens
+  useEffect(() => {
+    if (open) {
+      getUserLocation();
+    }
+  }, [open]);
+
   // Reverse geocoding to get location info
   useEffect(() => {
     if (location && open) {
       fetchLocationInfo(location.latitude, location.longitude);
     }
   }, [location, open]);
+
+  const getUserLocation = async () => {
+    setIsGettingLocation(true);
+    setLocationError(null);
+
+    const userLoc = await getCurrentLocation();
+
+    if (userLoc) {
+      setCurrentLocation(userLoc);
+      console.log('✅ Current location obtained:', userLoc);
+    } else {
+      setLocationError('Unable to get your location. Please enable location services.');
+      console.error('❌ Failed to get current location');
+    }
+
+    setIsGettingLocation(false);
+  };
 
   const fetchLocationInfo = async (lat: number, lng: number) => {
     setIsLoadingLocation(true);
@@ -146,6 +183,32 @@ export function CreateTipModal({ open, onOpenChange, location, onTipCreated }: C
       return;
     }
 
+    // GPS validation: Check if user is within 50m of tip location
+    if (currentLocation) {
+      const tipLocation: Location = {
+        latitude: location.latitude,
+        longitude: location.longitude,
+      };
+
+      const isValid = validateLocationProximity(currentLocation, tipLocation, 50);
+
+      if (!isValid) {
+        const distance = calculateDistance(currentLocation, tipLocation);
+        toast.error(
+          `You must be within 50m of the location to create a tip. You are ${formatDistance(distance)} away.`,
+          { duration: 5000 }
+        );
+        return;
+      }
+
+      console.log('✅ Location validation passed');
+    } else {
+      // If we couldn't get user's location, show warning but allow creation
+      toast.warning('Could not verify your location. Please ensure you are at the location.', {
+        duration: 5000,
+      });
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -168,6 +231,8 @@ export function CreateTipModal({ open, onOpenChange, location, onTipCreated }: C
       form.reset();
       setImageUrls([]);
       setLocationInfo(null);
+      setCurrentLocation(null);
+      setLocationError(null);
       onTipCreated?.();
     } catch (error) {
       console.error('Error creating tip:', error);
@@ -233,6 +298,27 @@ export function CreateTipModal({ open, onOpenChange, location, onTipCreated }: C
                       {location?.latitude.toFixed(4)}, {location?.longitude.toFixed(4)}
                     </span>
                   </div>
+
+                  {/* Distance from current location */}
+                  {currentLocation && location && (
+                    <div className="mt-2">
+                      {(() => {
+                        const distance = calculateDistance(currentLocation, {
+                          latitude: location.latitude,
+                          longitude: location.longitude,
+                        });
+                        const isValid = distance <= 50;
+                        return (
+                          <Badge
+                            variant={isValid ? 'default' : 'destructive'}
+                            className="text-xs"
+                          >
+                            {isValid ? '✓' : '✗'} {formatDistance(distance)} away
+                          </Badge>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="text-sm text-muted-foreground">
@@ -242,6 +328,45 @@ export function CreateTipModal({ open, onOpenChange, location, onTipCreated }: C
             </div>
           </div>
         </div>
+
+        {/* Location validation alerts */}
+        {isGettingLocation && (
+          <Alert>
+            <Navigation className="h-4 w-4 animate-pulse" />
+            <AlertDescription>
+              Getting your current location...
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {locationError && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              {locationError}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {currentLocation && location && (
+          (() => {
+            const distance = calculateDistance(currentLocation, {
+              latitude: location.latitude,
+              longitude: location.longitude,
+            });
+            if (distance > 50) {
+              return (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    You are {formatDistance(distance)} away from this location. You must be within 50m to create a tip.
+                  </AlertDescription>
+                </Alert>
+              );
+            }
+            return null;
+          })()
+        )}
 
         <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
           {/* Category Selection */}
@@ -271,11 +396,23 @@ export function CreateTipModal({ open, onOpenChange, location, onTipCreated }: C
 
           {/* Content */}
           <div className="space-y-2">
-            <Label htmlFor="content">Your Tip</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="content">Your Tip</Label>
+              <span className={`text-xs ${
+                form.watch('content')?.length > 280
+                  ? 'text-destructive'
+                  : form.watch('content')?.length > 250
+                  ? 'text-orange-500'
+                  : 'text-muted-foreground'
+              }`}>
+                {form.watch('content')?.length || 0} / 280
+              </span>
+            </div>
             <Textarea
               id="content"
               placeholder="Share your experience... What makes this place special? Any tips for fellow nomads?"
               className="min-h-[100px] resize-none"
+              maxLength={280}
               {...form.register('content')}
             />
             {form.formState.errors.content && (
@@ -288,18 +425,34 @@ export function CreateTipModal({ open, onOpenChange, location, onTipCreated }: C
           {/* Images */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <Label>Images (optional)</Label>
+              <Label>
+                Images (optional)
+                <span className="text-xs text-muted-foreground ml-2">
+                  {imageUrls.length} / 3
+                </span>
+              </Label>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={addImageUrl}
+                disabled={imageUrls.length >= 3}
                 className="text-xs h-8"
               >
                 <Camera className="w-3 h-3 mr-1" />
                 Add Image
               </Button>
             </div>
+            {imageUrls.length >= 3 && (
+              <p className="text-xs text-muted-foreground">
+                Maximum 3 images reached
+              </p>
+            )}
+            {form.formState.errors.images && (
+              <p className="text-sm text-destructive">
+                {form.formState.errors.images.message}
+              </p>
+            )}
             
             {imageUrls.length > 0 && (
               <div className="grid grid-cols-2 gap-3">
