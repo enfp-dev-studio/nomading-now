@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { MapPin, Camera, X, Loader2, Plus, Navigation, AlertCircle } from 'lucide-react';
+import { MapPin, Camera, X, Loader2, Plus, Navigation, AlertCircle, Upload } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -17,6 +17,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Progress } from '@/components/ui/progress';
 import { TIP_CATEGORIES, TipCategory } from '@/types';
 import { useAuthStore } from '@/store/useAuthStore';
 import { tipsApi } from '@/lib/database';
@@ -28,6 +29,11 @@ import {
   validateLocationProximity,
   type Location
 } from '@/lib/location-utils';
+import {
+  uploadImageWithThumbnail,
+  isS3Configured,
+  type UploadProgress
+} from '@/lib/image-upload';
 
 const createTipSchema = z.object({
   content: z.string()
@@ -52,10 +58,19 @@ interface CreateTipModalProps {
   onTipCreated?: () => void;
 }
 
+interface UploadedImage {
+  originalUrl: string;
+  thumbnailUrl: string;
+  preview: string;
+}
+
 export function CreateTipModal({ open, onOpenChange, location, onTipCreated }: CreateTipModalProps) {
   const { user } = useAuthStore();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<{ [key: number]: UploadProgress }>({});
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [locationInfo, setLocationInfo] = useState<{
     city: string;
     country: string;
@@ -157,19 +172,106 @@ export function CreateTipModal({ open, onOpenChange, location, onTipCreated }: C
     }
   };
 
-  const addImageUrl = () => {
-    const url = prompt('Enter image URL (from Pexels or other source):');
-    if (url && url.trim()) {
-      const newUrls = [...imageUrls, url.trim()];
-      setImageUrls(newUrls);
-      form.setValue('images', newUrls);
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    // Check S3 configuration
+    if (!isS3Configured()) {
+      toast.error('Image upload is not configured. Please set up S3 credentials.');
+      return;
+    }
+
+    // Check image limit
+    if (uploadedImages.length + files.length > 3) {
+      toast.error('Maximum 3 images allowed');
+      return;
+    }
+
+    setIsUploading(true);
+
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const imageIndex = uploadedImages.length + i;
+
+        // Create preview URL
+        const preview = URL.createObjectURL(file);
+
+        try {
+          // Upload with progress tracking
+          const result = await uploadImageWithThumbnail(file, (progress) => {
+            setUploadProgress((prev) => ({
+              ...prev,
+              [imageIndex]: progress,
+            }));
+          });
+
+          // Add to uploaded images
+          setUploadedImages((prev) => [
+            ...prev,
+            {
+              originalUrl: result.originalUrl,
+              thumbnailUrl: result.thumbnailUrl,
+              preview,
+            },
+          ]);
+
+          // Update form
+          const newImageUrls = [
+            ...(form.getValues('images') || []),
+            result.thumbnailUrl,
+          ];
+          form.setValue('images', newImageUrls);
+
+          // Clear progress
+          setUploadProgress((prev) => {
+            const newProgress = { ...prev };
+            delete newProgress[imageIndex];
+            return newProgress;
+          });
+
+          toast.success(`Image ${i + 1} uploaded successfully`);
+        } catch (error) {
+          console.error('Error uploading image:', error);
+          toast.error(
+            error instanceof Error ? error.message : 'Failed to upload image'
+          );
+          URL.revokeObjectURL(preview);
+        }
+      }
+    } finally {
+      setIsUploading(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
+  const handleAddImageClick = () => {
+    if (uploadedImages.length >= 3) {
+      toast.error('Maximum 3 images allowed');
+      return;
+    }
+    fileInputRef.current?.click();
+  };
+
   const removeImage = (index: number) => {
-    const newUrls = imageUrls.filter((_, i) => i !== index);
-    setImageUrls(newUrls);
-    form.setValue('images', newUrls);
+    const imageToRemove = uploadedImages[index];
+
+    // Revoke preview URL to free memory
+    if (imageToRemove.preview) {
+      URL.revokeObjectURL(imageToRemove.preview);
+    }
+
+    // Remove from state
+    const newImages = uploadedImages.filter((_, i) => i !== index);
+    setUploadedImages(newImages);
+
+    // Update form
+    const newImageUrls = newImages.map((img) => img.thumbnailUrl);
+    form.setValue('images', newImageUrls);
   };
 
   const handleSubmit = async (data: CreateTipForm) => {
@@ -212,11 +314,14 @@ export function CreateTipModal({ open, onOpenChange, location, onTipCreated }: C
     setIsSubmitting(true);
 
     try {
+      // Use thumbnail URLs for display in the feed
+      const imageThumbnails = uploadedImages.map((img) => img.thumbnailUrl);
+
       await tipsApi.createTip({
         user_id: user.id,
         content: data.content,
         category: data.category as TipCategory,
-        images: imageUrls.length > 0 ? imageUrls : undefined,
+        images: imageThumbnails.length > 0 ? imageThumbnails : undefined,
         location: {
           latitude: location.latitude,
           longitude: location.longitude,
@@ -227,9 +332,17 @@ export function CreateTipModal({ open, onOpenChange, location, onTipCreated }: C
       });
 
       toast.success('🎉 Tip created successfully!');
+
+      // Clean up preview URLs
+      uploadedImages.forEach((img) => {
+        if (img.preview) {
+          URL.revokeObjectURL(img.preview);
+        }
+      });
+
       onOpenChange(false);
       form.reset();
-      setImageUrls([]);
+      setUploadedImages([]);
       setLocationInfo(null);
       setCurrentLocation(null);
       setLocationError(null);
@@ -243,9 +356,16 @@ export function CreateTipModal({ open, onOpenChange, location, onTipCreated }: C
   };
 
   const handleClose = () => {
+    // Clean up preview URLs
+    uploadedImages.forEach((img) => {
+      if (img.preview) {
+        URL.revokeObjectURL(img.preview);
+      }
+    });
+
     onOpenChange(false);
     form.reset();
-    setImageUrls([]);
+    setUploadedImages([]);
     setLocationInfo(null);
   };
 
@@ -428,40 +548,80 @@ export function CreateTipModal({ open, onOpenChange, location, onTipCreated }: C
               <Label>
                 Images (optional)
                 <span className="text-xs text-muted-foreground ml-2">
-                  {imageUrls.length} / 3
+                  {uploadedImages.length} / 3
                 </span>
               </Label>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={addImageUrl}
-                disabled={imageUrls.length >= 3}
-                className="text-xs h-8"
-              >
-                <Camera className="w-3 h-3 mr-1" />
-                Add Image
-              </Button>
+              <div className="flex items-center gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAddImageClick}
+                  disabled={uploadedImages.length >= 3 || isUploading}
+                  className="text-xs h-8"
+                >
+                  {isUploading ? (
+                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                  ) : (
+                    <Upload className="w-3 h-3 mr-1" />
+                  )}
+                  {isUploading ? 'Uploading...' : 'Upload Image'}
+                </Button>
+              </div>
             </div>
-            {imageUrls.length >= 3 && (
+
+            {uploadedImages.length >= 3 && (
               <p className="text-xs text-muted-foreground">
                 Maximum 3 images reached
               </p>
             )}
+
+            {!isS3Configured() && (
+              <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription className="text-xs">
+                  Image upload requires S3 configuration. Please set VITE_S3_* environment variables.
+                </AlertDescription>
+              </Alert>
+            )}
+
             {form.formState.errors.images && (
               <p className="text-sm text-destructive">
                 {form.formState.errors.images.message}
               </p>
             )}
-            
-            {imageUrls.length > 0 && (
+
+            {/* Upload Progress */}
+            {Object.entries(uploadProgress).map(([index, progress]) => (
+              <div key={index} className="space-y-1">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">
+                    {progress.phase === 'processing' && 'Processing...'}
+                    {progress.phase === 'uploading' && 'Uploading...'}
+                    {progress.phase === 'complete' && 'Complete'}
+                  </span>
+                  <span className="text-muted-foreground">{progress.percent}%</span>
+                </div>
+                <Progress value={progress.percent} className="h-1" />
+              </div>
+            ))}
+
+            {uploadedImages.length > 0 && (
               <div className="grid grid-cols-2 gap-3">
-                {imageUrls.map((url, index) => (
+                {uploadedImages.map((image, index) => (
                   <div key={index} className="relative group">
                     <div className="aspect-video bg-muted rounded-md overflow-hidden">
                       <img
-                        src={url}
-                        alt={`Tip image ${index + 1}`}
+                        src={image.preview}
+                        alt={`Uploaded image ${index + 1}`}
                         className="w-full h-full object-cover"
                         onError={(e) => {
                           e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiBmaWxsPSIjZjNmNGY2Ii8+CjxwYXRoIGQ9Ik0xMiAxNmMtMi4yMSAwLTQtMS43OS00LTRzMS43OS00IDQtNCA0IDEuNzkgNCA0LTEuNzkgNC00IDR6bTAtNmMtMS4xIDAtMiAuOS0yIDJzLjkgMiAyIDIgMi0uOSAyLTItLjktMi0yLTJ6IiBmaWxsPSIjOWNhM2FmIi8+Cjwvc3ZnPgo=';
@@ -477,6 +637,13 @@ export function CreateTipModal({ open, onOpenChange, location, onTipCreated }: C
                     >
                       <X className="w-3 h-3" />
                     </Button>
+                    <Badge
+                      variant="secondary"
+                      className="absolute bottom-1 right-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Camera className="w-2 h-2 mr-1" />
+                      Uploaded
+                    </Badge>
                   </div>
                 ))}
               </div>
